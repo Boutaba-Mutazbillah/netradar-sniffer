@@ -1,10 +1,3 @@
-/* ==============================================================================
- * Technical Blueprint: Boutaba NetRadar Hardware Engine (v3.0)
- * Chief Architect: Motezeballah Boutaba
- * Design: Low-level Raw Socket sniffer for pure binary packet streaming.
- * ==============================================================================
- */
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,30 +13,26 @@ int main() {
     int raw_socket;
     unsigned char *buffer = (unsigned char *)malloc(BUFFER_SIZE);
     if (buffer == NULL) {
-        fprintf(stderr, "[-] Memory Allocation Failed in Heap.\n");
+        fprintf(stderr, "Memory Allocation Failed in Heap.\n");
         return 1;
     }
 
-    /* 1. إنشاء الـ Raw Socket لالتقاط كافة حزم الشبكة الواردة والصادرة */
     raw_socket = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
     if (raw_socket < 0) {
-        fprintf(stderr, "[-] Socket Initialization Failed. Ensure Root Privileges.\n");
+        fprintf(stderr, "Socket Initialization Failed. Ensure Root Privileges.\n");
         free(buffer);
         return 1;
     }
 
-    /* 2. حلقة الالتقاط اللانهائية وضخ البيانات الثنائية النظيفة ديركت */
     while (1) {
         ssize_t packet_size = recvfrom(raw_socket, buffer, BUFFER_SIZE, 0, NULL, NULL);
         if (packet_size < 0) {
-            continue; /* تخطي الحزم المشوهة للحفاظ على استقرار المعالجة */
+            continue;
         }
 
-        /* 3. ضخ الحزمة كاملة كبث ثنائي صافي (Raw Byte Stream) عبر الـ stdout */
-        /* هذا البث سيمر عبر الأنبوب (FIFO Pipe) ديركت إلى محرك البايثون */
         fwrite(&packet_size, sizeof(ssize_t), 1, stdout);
         fwrite(buffer, 1, packet_size, stdout);
-        fflush(stdout); /* تفريغ فوري للـ Buffer لمنع تأخير الـ I/O */
+        fflush(stdout);
     }
 
     close(raw_socket);
