@@ -1,40 +1,59 @@
 section .data
-    fifo_path db '/tmp/r_stream', 0
-    snif_path db './sniffer', 0
-    anal_path db './analyst', 0
-
+    pipe_path db '\\.\pipe\r_stream', 0
+    snif_path db 'sniffer.exe', 0
+    anal_path db 'analyst.exe', 0
 section .text
 global _start
-
+extern _CreateNamedPipeA@32
+extern _CreateProcessA@40
+extern _ExitProcess@4
 _start:
-    mov rax, 87
-    mov rdi, fifo_path
-    syscall
-    mov rax, 133
-    mov rdi, fifo_path
-    mov rsi, 0x11B6
-    xor rdx, rdx
-    syscall
-    mov rax, 57
-    syscall
-    test rax, rax
-    js exit_error
-    jz run_sniffer      
-    mov rax, 59
-    mov rdi, anal_path
-    xor rsi, rsi
-    xor rdx, rdx
-    syscall
-    jmp exit_error
-
-run_sniffer:
-    mov rax, 59
-    mov rdi, snif_path
-    xor rsi, rsi
-    xor rdx, rdx
-    syscall
-
+    push 0
+    push 0
+    push 0
+    push 255
+    push 2048
+    push 2048
+    push 3
+    push pipe_path
+    call _CreateNamedPipeA@32
+    mov [pipe_handle], eax
+    cmp eax, -1
+    je exit_error
+    push proc_info_snif
+    push start_info_snif
+    push 0
+    push 0
+    push 0
+    push 0
+    push 0
+    push 0
+    push snif_path
+    push 0
+    call _CreateProcessA@40
+    test eax, eax
+    jz exit_error
+    push proc_info_anal
+    push start_info_anal
+    push 0
+    push 0
+    push 0
+    push 0
+    push 0
+    push 0
+    push anal_path
+    push 0
+    call _CreateProcessA@40
+    test eax, eax
+    jz exit_error
+    push 0
+    call _ExitProcess@4
 exit_error:
-    mov rax, 60
-    mov rdi, 1
-    syscall
+    push 1
+    call _ExitProcess@4
+section .bss
+    pipe_handle     resd 1
+    start_info_snif resb 68
+    proc_info_snif  resb 16
+    start_info_anal resb 68
+    proc_info_anal  resb 16
