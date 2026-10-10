@@ -1,38 +1,51 @@
 section .text
 global _start
 
+extern _ReadFile@20
+extern _ExitProcess@4
+extern _GetStdHandle@4
+
 _start:
-    sub rsp, 16
+    push -10
+    call _GetStdHandle@4
+    mov [stdin_handle], eax
+    sub esp, 16
 
 read_loop:
-    xor rax, rax
-    xor rdi, rdi          
-    mov rsi, rsp        
-    mov rdx, 8
-    syscall
+    push 0
+    push bytes_read
+    push 8
+    mov eax, esp
+    add eax, 8
+    push eax            
+    push dword [stdin_handle]
+    call _ReadFile@20
 
-    cmp rax, 8
-    jne exit_clean      
+    cmp dword [bytes_read], 8
+    jne exit_clean
 
-    mov r14, [rsp]      
+    mov ecx, [esp]
+    sub esp, ecx
 
-    sub rsp, r14
-    
-    xor rax, rax
-    xor rdi, rdi
-    mov rsi, rsp
-    mov rdx, r14
-    syscall
+    push 0
+    push bytes_read
+    push ecx
+    push esp
+    push dword [stdin_handle]
+    call _ReadFile@20
 
-    cmp word [rsp + 12], 0x0008 
+    cmp word [esp + 12], 0x0008
     jne next_iteration
 
 next_iteration:
-    add rsp, r14        
+    add esp, ecx
     jmp read_loop
 
 exit_clean:
-    add rsp, 16
-    mov rax, 60         
-    xor rdi, rdi
-    syscall
+    add esp, 16
+    push 0
+    call _ExitProcess@4
+
+section .bss
+    stdin_handle resd 1
+    bytes_read   resd 1
