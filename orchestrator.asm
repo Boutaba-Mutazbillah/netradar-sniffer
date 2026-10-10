@@ -10,20 +10,16 @@ _start:
     mov rax, 87
     mov rdi, fifo_path
     syscall
-
     mov rax, 133
     mov rdi, fifo_path
     mov rsi, 0x11B6
     xor rdx, rdx
     syscall
-
     mov rax, 57
     syscall
-
     test rax, rax
     js exit_error
     jz run_sniffer      
-
     mov rax, 59
     mov rdi, anal_path
     xor rsi, rsi
