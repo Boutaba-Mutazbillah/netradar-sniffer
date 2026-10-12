@@ -1,86 +1,70 @@
-# Technical Blueprint: Boutaba NetRadar Suite (v3.0)
+# Raw Stream Packet Analyzer (RSPA) - Unified Edition
 
-**Chief Architect:** Motezeballah Boutaba  
-**Target Architecture:** POSIX-Compliant Microarchitecture (Arch Linux Optimized)  
-**Design Paradigm:** Asynchronous Parallel Pipeline Architecture with Kernel-Bypass Memory Abstractions
+### Project Overview
+This project is a high-performance, low-level network monitoring and packet analysis suite designed natively for the Windows operating system. It operates entirely in user mode without external library dependencies by dynamically resolving Windows API functions directly from the Process Environment Block (PEB). 
+
+In this unified edition, all three components are combined into a **single, multi-threaded executable**, eliminating disk footprint, removing named pipe overhead, and leveraging direct memory synchronization for packet processing.
 
 ---
 
-##  1. System Architecture & Component Mapping
+### Architecture and Component Breakdown
 
-The system architecture is engineered as a decoupled, multi-engine runtime environment designed to partition data collection from logical telemetry analysis. The entire workflow executes in volatile memory spaces (RAM), utilizing named pipes (FIFO) to enforce deterministic boundaries and achieve maximum processing throughput with zero disk-write operations.
+#### 1. Core Orchestrator (Main Thread)
+The orchestrator serves as the administrative controller and performance tuning module of the suite. It initializes the environment and ensures the payload executes with maximum CPU throughput.
+* **Core Affinity and Priority Binding:** It elevates the process execution context to `REALTIME_PRIORITY_CLASS` and restricts thread execution strictly to CPU Core 0 via `SetThreadAffinityMask`. This prevents context-switching latency and guarantees dedicated hardware cycles.
+* **Thread Generation:** Instead of launching external binaries, it uses dynamically resolved execution functions (`CreateThread`) to spin up the Ingestion and Processing routines concurrently within the same process space.
 
-```mermaid
-graph TD
-    %% Hardware Space
-    NIC[Network Interface Card - NIC] --> Promisc[Promiscuous Mode Enforcement]
-    Promisc --> RawSock[AF_PACKET / SOCK_RAW Linux Socket]
+#### 2. Network Ingestion Subsystem (Sniffer Thread)
+The ingestion subsystem interfaces directly with the Windows Sockets interface to capture live network transit data.
+* **Raw Socket Initialization:** Dynamically maps and initializes the Windows Sockets subsystem (`ws2_32.dll`) via explicit `LoadLibraryA` implementation. It opens a low-level raw network socket using the `SOCK_RAW` specification.
+* **Packet Capture Loop:** Intercepts raw IP packets directly from the network interface using `recvfrom`.
+* **Stream Deserialization & Memory Transit:** Prepends an 8-byte metadata header containing the explicit packet size before streaming the raw payload chunk directly into a shared thread-safe ring buffer in memory.
 
-    %% Kernel Space
-    subgraph Kernel_Context [Kernel Bypass / Ring 0 Context]
-        RawSock --> Buffer[Stack-Protected Ring Buffer]
-        Timer[Hardware Timer - RDTSC / LFENCE] --> PacketC[packet_sniffer.c Engine]
-        Buffer --> PacketC
-    end
+#### 3. Data Processing Subsystem (Analyst Thread)
+The processing subsystem handles the parsing and evaluation of the intercepted network data received from the ingestion buffer.
+* **Buffer Consumption:** Monitors the shared memory layout using synchronized thread markers.
+* **Stream Deserialization:** Reads the stream sequentially. It reads the initial 8-byte length allocation header, dynamically shifts the stack allocation constraint to match the inbound packet payload size, and reads the explicit packet data directly into the newly adjusted memory space.
+* **State Verification:** Validates packet alignment metrics against fixed byte boundaries before looping back to the read cycle.
 
-    %% Memory Bridge
-    subgraph Shared_Pipeline [Volatile Shared Pipeline - RAM]
-        PacketC --> FIFO[Named Pipe: /tmp/netradar_stream.fifo]
-    end
+---
 
-    %% User Space
-    subgraph User_Space [Asynchronous User Space Execution]
-        FIFO --> CorePy[core_analyst.py Engine]
-        CorePy --> Canary[Stack Canary Validation]
-        Canary --> Terminal[Terminal Matrix UI Output]
-    end
+### Technical Implementation Merits
+* **Single Binary Execution:** The entire architecture is self-contained. It leaves zero trace of multiple background tasks since it does not depend on creating or executing secondary files like `sniffer.exe` or `analyst.exe`.
+* **Independent Execution:** The binary contains zero hardcoded imports. It discovers base addresses of `kernel32.dll` and `ws2_32.dll` dynamically at runtime by parsing the `InInitializationOrderModuleList` within the Process Environment Block (PEB). Function pointers are resolved manually by traversing the Export Address Table (EAT).
+* **Silent Background Operation:** The module emits no console windows, standard output logs, or diagnostic visual markers, making the entire suite completely silent.
 
-    %% Orchestration
-    subgraph Management_Platform [Management System Platform]
-        Bash[radar_orchestrator.sh] --> PacketC
-        Bash --> FIFO
-        Bash --> CorePy
-    end
+---
 
-    %% Theme Styling
-    style NIC fill:#111,stroke:#333,stroke-width:2px,color:#fff
-    style RawSock fill:#1a1a1a,stroke:#c00,stroke-width:2px,color:#ff4444
-    style FIFO fill:#1a1a1a,stroke:#0c0,stroke-width:2px,color:#00ff00
-    style CorePy fill:#1a1a1a,stroke:#00bfff,stroke-width:2px,color:#00bfff
-    style Bash fill:#333,stroke:#ff8c00,stroke-width:2px,color:#ff8c00
+### Compilation, Linkage, and Installation
+
+To build and deploy this project without any external dependencies or standard import tables, you must assemble the unified source module using NASM (Netwide Assembler) and link it using either the Microsoft Linker (`link.exe`) or the MinGW Linker (`ld.exe`) with specific compilation parameters.
+
+#### Prerequisites
+* **NASM Compiler** installed and configured within your global environment path variables.
+* **Windows SDK Linker** (`link.exe`) or **MinGW toolchain** (`i686-w64-mingw32-ld`) targeting 32-bit architecture.
+
+#### Step 1: Compiling the Source Code
+Execute the following command within your terminal environment to translate your raw assembly instructions into a standalone 32-bit object file:
+
+```bash
+nasm -f win32 rspa_unified.asm -o rspa_unified.obj
 ```
 
----
+#### Step 2: Linking the Binary
+Link the generated object file using the parameters detailed below. These directives strip symbol tables, bypass standard default runtime libraries, adjust internal alignment boundaries, and enforce a quiet runtime subsystem status.
 
-##  2. Deep-Dive Subsystem Specifications
+**Using Microsoft Linker (link.exe):**
+```bash
+link.exe /SUBSYSTEM:WINDOWS /ENTRY:_start /NODEFAULTLIB /ALIGN:16 rspa_unified.obj /OUT:rspa_unified.exe
+```
 
-### Part 1: Hardware Core Engine (`src/packet_sniffer.c`)
+**Using MinGW Linker (ld.exe):**
+```bash
+ld -m i386pe -e _start -s --subsystem windows rspa_unified.obj -o rspa_unified.exe
+```
 
-- **Execution Level:** Operational at Link-Layer privilege boundaries via `AF_PACKET` mapping.
-- **Data Capture Matrix:** Intercepts raw Ethernet structures directly from the network driver queue, avoiding standard network stack encapsulation overhead.
-- **Input/Output Binding:** Serializes incoming frame sizes into explicit `ssize_t` structures, prepending the raw buffer chunk and flushing it instantly to `stdout` via memory blocks.
-
-### Part 2: Nanosecond Timestamp Bindings (`src/inline_asm.h`)
-
-- **Instruction Level Execution:** Implements strict hardware serialization utilizing `lfence` memory barriers to eliminate Out-of-Order processor pipeline execution.
-- **Telemetry Auditing:** Captures the CPU Time Stamp Counter via low-level `rdtsc` registry readings, allowing for nanosecond-precise evaluation of system packet latency.
-
-### Part 3: Asynchronous Logic Analyst (`src/core_analyst.py`)
-
-- **Threading Engine:** Leverages single-threaded, non-blocking asynchronous event loops to manage memory IO without context-switching exhaustion.
-- **Dissection Mechanics:** Unpacks the network stream sequentially using exact binary structures (`struct.unpack`). It evaluates protocol headers (`Ethernet/IPv4`) and logs metrics directly to the interface.
-- **Boundary Verification Safety:** Enforces rigid input length constraints (0 < packet_size <= 65536 bytes) to neutralize buffer overflow or corrupted stream injection vulnerabilities.
-
-### Part 4: System Master Orchestrator (`radar_orchestrator.sh`)
-
-- **Environment Automation:** Programs the volatile shared pipeline boundaries by spawning an explicit `/tmp/netradar_stream.fifo` file in temporary memory.
-- **Automated Compilation Toolchain:** Compiles the underlying hardware source code dynamically using `gcc -O3` optimization configurations.
-- **Lifecycle Integration:** Monitors thread PIDs and registers clean termination signals (`SIGINT/SIGTERM`) to flush memory allocations automatically upon exit.
-
----
-
-##  3. Compliance Framework & Verification Matrix
-
-All variables, volatile allocations, and data streams reside strictly inside transient heap structures. Unauthorized deployment against external networks or multi-tenant architectures without local administrative authorization remains non-compliant under standard engineering framework protocols.
-
----
+#### Operational Execution Flow
+1. Execute `rspa_unified.exe` with Elevated Administrative Privileges (Required for low-level `SOCK_RAW` instantiation).
+2. The main thread triggers real-time thread priority scheduling, targets system Core 0, and structures the shared memory block.
+3. The application concurrently spawns internal background worker threads (`Sniffer Thread` and `Analyst Thread`) with detached execution parameters.
+4. The sniffer thread passes intercepted payloads directly into the local memory channel, which the analyst thread continuously parses directly from stack memory allocations.
